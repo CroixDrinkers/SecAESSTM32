@@ -6,6 +6,7 @@
 ;* HISTORY:
 ;*----------------------------------------------------------------------------
 ;* V 1.0 | 01/05/19 | Initial version of the AES library.
+;* V KK1.1 : Modified to support for cortex-M3 cores to work with keepkey firmware
 ;*****************************************************************************
 */
 
@@ -240,9 +241,91 @@ SET_REPT_INC(count)
 	SET_REPT_INC(count)
 #endif
 	ldr    r6, [r4], #0x04          // r6  = log (x[3]) | log (x[2]) | log (x[1]) | log (x[0])
-	uadd8  r6, r6, r7		        // r6  = r6 + (log (rmult)|log (rmult)|log (rmult)|log (rmult))
-	sel    r8, r2, r10              // get the addition carry flag in r8
-	uadd8  r6, r6, r8               // add the carry flag modulo 256
+
+/************************************************************************************
+* The section enclosed by the long asterisk comment lines above and below was modified 
+* from the original to work with the cortex-m3 instruction set. The original source
+* written for m4 instructions contained an m3-incompatible sequence of three lines:
+*
+*	uadd8  r6, r6, r7		        // r6  = r6 + (log (rmult)|log (rmult)|log (rmult)|log (rmult))*
+*	sel    r8, r2, r10              // get the addition carry flag in r8
+*	uadd8  r6, r6, r8               // add the carry flag modulo 256
+*
+* The code below implements this sequence using m3 instructions
+*/
+	push {r1-r4}
+	mov  r3, r6
+	mov  r1, r3
+	mov  r6, r7
+
+ 	movs  r10, #0
+
+// At this point, 
+//    r1 is operand 1 
+//    r6 is operand 2
+//    r10 is result
+
+// For the following, r2, r3, r4 are scratch regs
+
+	lsrs  r2, r3, #24
+	lsrs  r3, r6, #24
+	adds  r4, r2, r3
+	cmp r4, #255  
+	bls.n noadd1
+	uxtb  r3, r4
+	adds  r4, r3, #1
+noadd1:
+	lsls  r3, r4, #24
+	orrs  r10, r3
+	mov r3, r1
+	lsrs  r3, r3, #16
+	uxtb  r2, r3
+	lsrs	r3, r6, #16
+	uxtb	r3, r3
+	adds	r4, r2, r3
+	cmp r4, #255  // 0xff
+	bls.n noadd2
+	uxtb  r3, r4
+	adds  r4, r3, #1
+
+noadd2:
+	lsls  r3, r4, #16
+	orrs  r10, r3
+	mov   r3, r1
+	lsrs  r3, r3, #8
+	uxtb  r2, r3
+	lsrs	r3, r6, #8
+	uxtb	r3, r3
+	adds	r4, r2, r3
+	cmp r4, #255  // 0xff
+	bls.n noadd3
+	uxtb  r3, r4
+	adds  r4, r3, #1
+
+noadd3:
+	lsls  r3, r4, #8
+	orrs  r10, r3
+	uxtb  r2, r1
+	uxtb  r3, r6
+	adds  r4, r2, r3
+	cmp r4, #255  // 0xff
+	bls.n noadd4
+	uxtb  r3, r4
+	adds  r4, r3, #1
+
+noadd4:
+ 	orrs  r10, r4
+
+  // At this point, r10 contains result of r6 uadd8 r7
+
+ 	mov   r6, r10
+
+ 	pop   {r1-r4}
+
+/* 
+* The section enclosed by the starred comment lines below and above was modified 
+* from the original. 
+*************************************************************************************/
 
 	mov  r8, r6                     // put log(x[0]) + log(rmult) mod 255 in r8
 	and  r8, #0xFF

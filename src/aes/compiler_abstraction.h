@@ -129,12 +129,8 @@ $labelname.endlabel
     #define MYWORD .word
     #define MYLONG .long
 	.syntax unified
-	.cpu cortex-m4
-	.fpu softvfp
-	.thumb
-    .syntax unified
-	#define LOCAL .local
-	#define ALIGN(a) .align(a)
+	  #define LOCAL .local
+	  #define ALIGN(a) .align(a)
 
     .macro ldr_addr reg, val
     movw \reg, #:lower16:\val

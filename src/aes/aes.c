@@ -8,12 +8,128 @@
 ;* HISTORY:
 ;*----------------------------------------------------------------------------------------------------------------------
 ;* V 1.0 | 01/23/18 | First version  
+;* V kk1.1: Added support for CBC mode to support keepkey firmware
 ;***********************************************************************************************************************
 */
 
-#include "aes.h"
-#include "string.h"
-#include "platform.h"
+#include <string.h>
+#include "keepkey/firmware/aes_sca/aes.h"
+#include "trezor/crypto/aes/aes.h"
+#include "trezor/crypto/rand.h"
+
+
+AES_RETURN aes128_cbc_sca_encrypt(const unsigned char *key, const unsigned char *ibuf, unsigned char *obuf,
+                    int len, unsigned char *iv)
+{   
+	int nb = len >> AES_BLOCK_SIZE_P2;
+	STRUCT_AES fctx;
+	unsigned char out[16];
+
+    if(len & (AES_BLOCK_SIZE - 1))
+        return EXIT_FAILURE;
+
+# ifdef FAST_BUFFER_OPERATIONS
+    if(!ALIGN_OFFSET( ibuf, 4 ) && !ALIGN_OFFSET( iv, 4 ))
+        while(nb--)
+        {
+            lp32(iv)[0] ^= lp32(ibuf)[0];
+            lp32(iv)[1] ^= lp32(ibuf)[1];
+            lp32(iv)[2] ^= lp32(ibuf)[2];
+            lp32(iv)[3] ^= lp32(ibuf)[3];
+//            if(aes_encrypt(iv, iv, ctx) != EXIT_SUCCESS)
+            if(aes(MODE_KEYINIT|MODE_AESINIT_ENC|MODE_ENC, &fctx, key, iv, out, NULL, NULL) != NO_ERROR)
+                return EXIT_FAILURE;
+            memcpy(iv, out, AES_BLOCK_SIZE);
+
+            memcpy(obuf, iv, AES_BLOCK_SIZE);
+            ibuf += AES_BLOCK_SIZE;
+            obuf += AES_BLOCK_SIZE;
+        }
+    else
+# endif
+        while(nb--)
+        {
+            iv[ 0] ^= ibuf[ 0]; iv[ 1] ^= ibuf[ 1];
+            iv[ 2] ^= ibuf[ 2]; iv[ 3] ^= ibuf[ 3];
+            iv[ 4] ^= ibuf[ 4]; iv[ 5] ^= ibuf[ 5];
+            iv[ 6] ^= ibuf[ 6]; iv[ 7] ^= ibuf[ 7];
+            iv[ 8] ^= ibuf[ 8]; iv[ 9] ^= ibuf[ 9];
+            iv[10] ^= ibuf[10]; iv[11] ^= ibuf[11];
+            iv[12] ^= ibuf[12]; iv[13] ^= ibuf[13];
+            iv[14] ^= ibuf[14]; iv[15] ^= ibuf[15];
+
+//            if(aes_encrypt(iv, iv, ctx) != EXIT_SUCCESS)
+            if(aes(MODE_KEYINIT|MODE_AESINIT_ENC|MODE_ENC, &fctx, key, iv, out, NULL, NULL) != NO_ERROR)
+                return EXIT_FAILURE;
+            memcpy(iv, out, AES_BLOCK_SIZE);
+
+            memcpy(obuf, iv, AES_BLOCK_SIZE);
+            ibuf += AES_BLOCK_SIZE;
+            obuf += AES_BLOCK_SIZE;
+        }
+
+    return EXIT_SUCCESS;
+}
+
+
+
+AES_RETURN aes128_cbc_sca_decrypt(const unsigned char *key, const unsigned char *ibuf, unsigned char *obuf,
+                    int len, unsigned char *iv)
+{   unsigned char tmp[AES_BLOCK_SIZE];
+    int nb = len >> AES_BLOCK_SIZE_P2;
+    STRUCT_AES fctx;
+
+
+    if(len & (AES_BLOCK_SIZE - 1))
+        return EXIT_FAILURE;
+
+
+# ifdef FAST_BUFFER_OPERATIONS
+    if(!ALIGN_OFFSET( obuf, 4 ) && !ALIGN_OFFSET( iv, 4 ))
+        while(nb--)
+        {
+            memcpy(tmp, ibuf, AES_BLOCK_SIZE);
+//            if(aes_decrypt(ibuf, obuf, ctx) != EXIT_SUCCESS)
+
+            if(aes(MODE_KEYINIT|MODE_AESINIT_DEC|MODE_DEC, &fctx, key, ibuf, obuf, NULL, NULL) != NO_ERROR)
+                return EXIT_FAILURE;
+
+            lp32(obuf)[0] ^= lp32(iv)[0];
+            lp32(obuf)[1] ^= lp32(iv)[1];
+            lp32(obuf)[2] ^= lp32(iv)[2];
+            lp32(obuf)[3] ^= lp32(iv)[3];
+            memcpy(iv, tmp, AES_BLOCK_SIZE);
+            ibuf += AES_BLOCK_SIZE;
+            obuf += AES_BLOCK_SIZE;
+        }
+    else
+# endif
+        while(nb--)
+        {
+            memcpy(tmp, ibuf, AES_BLOCK_SIZE);
+//            if(aes_decrypt(ibuf, obuf, ctx) != EXIT_SUCCESS)
+
+            if(aes(MODE_KEYINIT|MODE_AESINIT_DEC|MODE_DEC, &fctx, key, ibuf, obuf, NULL, NULL) != NO_ERROR)
+                return EXIT_FAILURE;
+
+            obuf[ 0] ^= iv[ 0]; obuf[ 1] ^= iv[ 1];
+            obuf[ 2] ^= iv[ 2]; obuf[ 3] ^= iv[ 3];
+            obuf[ 4] ^= iv[ 4]; obuf[ 5] ^= iv[ 5];
+            obuf[ 6] ^= iv[ 6]; obuf[ 7] ^= iv[ 7];
+            obuf[ 8] ^= iv[ 8]; obuf[ 9] ^= iv[ 9];
+            obuf[10] ^= iv[10]; obuf[11] ^= iv[11];
+            obuf[12] ^= iv[12]; obuf[13] ^= iv[13];
+            obuf[14] ^= iv[14]; obuf[15] ^= iv[15];
+            memcpy(iv, tmp, AES_BLOCK_SIZE);
+            ibuf += AES_BLOCK_SIZE;
+            obuf += AES_BLOCK_SIZE;
+        }
+    return EXIT_SUCCESS;
+}
+
+
+
+
 
 /*
  * \brief  	AES engine for encrypting and decrypting protecting by affine masking 
@@ -31,7 +147,7 @@ UINT aes(UCHAR Mode, STRUCT_AES* struct_aes, const UCHARp key, const UCHARp inpu
 	UINT ret = NO_ERROR;
 	UCHAR buf[19];
 
-	local_memset(buf, 0, sizeof(buf));
+	memset(buf, 0, sizeof(buf));
 
 	// Test if Mode asks for ENC and DEC at the same time or if the Mode as for no operation at all
 	ret |= test_mode(Mode);
@@ -53,14 +169,12 @@ UINT aes(UCHAR Mode, STRUCT_AES* struct_aes, const UCHARp key, const UCHARp inpu
 	
 	// MODE_KEYINIT with external randomness
 	if ((Mode & (MODE_KEYINIT|MODE_RANDOM_KEY_EXT)) == (MODE_KEYINIT|MODE_RANDOM_KEY_EXT)){
-		local_memcpy(buf,random_key,19);								// Copy external randomness in random_key
+		memcpy(buf,random_key,19);								// Copy external randomness in random_key
 	}
 	else{
-		if (get_random(buf, 19)!=NO_ERROR){						// Generate random value for key masking
-			ret = ret | ERR_OP_GEN_RANDOM_KEY;					// Return an error if random generation fails
-			goto err;
-		}
+		random_buffer(buf, 19);					// Generate random value for key masking
 	}
+
 
 	if (Mode & MODE_KEYINIT){
 		if (aes_loadKey(&struct_aes->key_context, key, buf)!=NO_ERROR){	// Key initialisation
@@ -73,13 +187,10 @@ UINT aes(UCHAR Mode, STRUCT_AES* struct_aes, const UCHARp key, const UCHARp inpu
 	
 	// MODE_AESINIT_ENC or MODE_AESINIT_DEC 
 	if (Mode & MODE_RANDOM_AES_EXT){
-		local_memcpy(buf,random_aes,19);
+		memcpy(buf,random_aes,19);
 	}
 	else{
-		if (get_random(buf, 19)!=NO_ERROR){						// Generate random value for state masking
-			ret = ret | ERR_OP_GEN_RANDOM_AES;					// return an error if random generation fails
-			goto err;
-		}
+		random_buffer(buf, 19);						// Generate random value for state masking
 	}
 	
 	// MODE_AESINIT_ENC or MODE_AESINIT_DEC
